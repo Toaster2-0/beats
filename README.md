@@ -1,3 +1,13 @@
+# Warning
+This fork adds an sql output to beats but is not supposed to be pulled back to the main project because I am not sure if it fits, nobody told me that he would like this feature (https://discuss.elastic.co/t/should-i-create-an-sql-output-for-beats/330563) and I am not exactly sure if the way I implemented it really makes sense (for others). I am processing the data in sql again to fit my needs. 
+If you think I should create a pull request to the main project, create an issue to let me know (maybe create also an issue in the https://github.com/elastic/beats project to check if a pull request would be accepted), then I am going to clean it up and push it to upstream. 
+
+
+
+
+
+
+
 [![Build Status](https://beats-ci.elastic.co/job/Beats/job/beats/job/main/badge/icon)](https://beats-ci.elastic.co/job/Beats/job/beats/job/main/)
 [![Go Report Card](https://goreportcard.com/badge/github.com/elastic/beats)](https://goreportcard.com/report/github.com/elastic/beats)
 [![Reviewed by Hound](https://img.shields.io/badge/Reviewed_by-Hound-8E64B0.svg)](https://houndci.com)
