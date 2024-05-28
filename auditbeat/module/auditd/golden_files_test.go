@@ -24,7 +24,6 @@ import (
 	"context"
 	"encoding/json"
 	"flag"
-	"io/ioutil"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -38,6 +37,7 @@ import (
 	"github.com/elastic/go-libaudit/v2"
 	"github.com/elastic/go-libaudit/v2/aucoalesce"
 
+	"github.com/elastic/beats/v7/auditbeat/ab"
 	"github.com/elastic/beats/v7/metricbeat/mb"
 	mbtest "github.com/elastic/beats/v7/metricbeat/mb/testing"
 )
@@ -87,7 +87,7 @@ func readLines(path string) (lines []string, err error) {
 }
 
 func readGoldenFile(t testing.TB, path string) (events []mapstr.M) {
-	data, err := ioutil.ReadFile(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("can't read golden file '%s': %v", path, err)
 	}
@@ -202,7 +202,7 @@ func TestGoldenFiles(t *testing.T) {
 				// Send stream terminator
 				returnMessage(terminator)
 
-			ms := mbtest.NewPushMetricSetV2(t, configForGolden())
+			ms := mbtest.NewPushMetricSetV2WithRegistry(t, configForGolden(), ab.Registry)
 			auditMetricSet := ms.(*MetricSet)
 			auditMetricSet.client.Close()
 			auditMetricSet.client = &libaudit.AuditClient{Netlink: mock}
@@ -216,7 +216,7 @@ func TestGoldenFiles(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if err = ioutil.WriteFile(goldenPath, data, 0o644); err != nil {
+				if err = os.WriteFile(goldenPath, data, 0o644); err != nil {
 					t.Fatalf("failed writing golden file '%s': %v", goldenPath, err)
 				}
 			}

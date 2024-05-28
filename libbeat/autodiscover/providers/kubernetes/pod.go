@@ -59,7 +59,7 @@ type pod struct {
 func NewPodEventer(uuid uuid.UUID, cfg *conf.C, client k8s.Interface, publish func(event []bus.Event)) (Eventer, error) {
 	logger := logp.NewLogger("autodiscover.pod")
 
-	var replicaSetWatcher, jobWatcher kubernetes.Watcher
+	var replicaSetWatcher, jobWatcher, namespaceWatcher, nodeWatcher kubernetes.Watcher
 
 	config := defaultConfig()
 	err := cfg.Unpack(&config)
@@ -96,22 +96,27 @@ func NewPodEventer(uuid uuid.UUID, cfg *conf.C, client k8s.Interface, publish fu
 		return nil, fmt.Errorf("couldn't create watcher for %T due to error %w", &kubernetes.Pod{}, err)
 	}
 
-	options := kubernetes.WatchOptions{
-		SyncTimeout: config.SyncPeriod,
-		Node:        config.Node,
-		Namespace:   config.Namespace,
+	metaConf := config.AddResourceMetadata
+
+	if metaConf.Node.Enabled() || config.Hints.Enabled() {
+		options := kubernetes.WatchOptions{
+			SyncTimeout: config.SyncPeriod,
+			Node:        config.Node,
+			Namespace:   config.Namespace,
+		}
+		nodeWatcher, err = kubernetes.NewNamedWatcher("node", client, &kubernetes.Node{}, options, nil)
+		if err != nil {
+			logger.Errorf("couldn't create watcher for %T due to error %+v", &kubernetes.Node{}, err)
+		}
 	}
 
-	metaConf := config.AddResourceMetadata
-	nodeWatcher, err := kubernetes.NewNamedWatcher("node", client, &kubernetes.Node{}, options, nil)
-	if err != nil {
-		logger.Errorf("couldn't create watcher for %T due to error %+v", &kubernetes.Node{}, err)
-	}
-	namespaceWatcher, err := kubernetes.NewNamedWatcher("namespace", client, &kubernetes.Namespace{}, kubernetes.WatchOptions{
-		SyncTimeout: config.SyncPeriod,
-	}, nil)
-	if err != nil {
-		logger.Errorf("couldn't create watcher for %T due to error %+v", &kubernetes.Namespace{}, err)
+	if metaConf.Namespace.Enabled() || config.Hints.Enabled() {
+		namespaceWatcher, err = kubernetes.NewNamedWatcher("namespace", client, &kubernetes.Namespace{}, kubernetes.WatchOptions{
+			SyncTimeout: config.SyncPeriod,
+		}, nil)
+		if err != nil {
+			logger.Errorf("couldn't create watcher for %T due to error %+v", &kubernetes.Namespace{}, err)
+		}
 	}
 
 	// Resource is Pod so we need to create watchers for Replicasets and Jobs that it might belongs to
@@ -153,12 +158,12 @@ func NewPodEventer(uuid uuid.UUID, cfg *conf.C, client k8s.Interface, publish fu
 	watcher.AddEventHandler(p)
 
 	if nodeWatcher != nil && (config.Hints.Enabled() || metaConf.Node.Enabled()) {
-		updater := kubernetes.NewNodePodUpdater(p.unlockedUpdate, watcher.Store(), &p.crossUpdate)
+		updater := kubernetes.NewNodePodUpdater(p.unlockedUpdate, watcher.Store(), p.nodeWatcher, &p.crossUpdate)
 		nodeWatcher.AddEventHandler(updater)
 	}
 
 	if namespaceWatcher != nil && (config.Hints.Enabled() || metaConf.Namespace.Enabled()) {
-		updater := kubernetes.NewNamespacePodUpdater(p.unlockedUpdate, watcher.Store(), &p.crossUpdate)
+		updater := kubernetes.NewNamespacePodUpdater(p.unlockedUpdate, watcher.Store(), p.namespaceWatcher, &p.crossUpdate)
 		namespaceWatcher.AddEventHandler(updater)
 	}
 
@@ -246,7 +251,11 @@ func (p *pod) GenerateHints(event bus.Event) bus.Event {
 	cname := utils.GetContainerName(container)
 
 	// Generate hints based on the cumulative of both namespace and pod annotations.
-	hints := utils.GenerateHints(annotations, cname, p.config.Prefix)
+	hints, incorrecthints := utils.GenerateHints(annotations, cname, p.config.Prefix, true, AllSupportedHints)
+	// We check whether the provided annotation follows the supported format and vocabulary. The check happens for annotations that have prefix co.elastic
+	for _, value := range incorrecthints {
+		p.logger.Debugf("provided hint: %s/%s is not in the supported list", p.config.Prefix, value)
+	}
 	p.logger.Debugf("Generated hints %+v", hints)
 
 	if len(hints) != 0 {
@@ -407,7 +416,7 @@ func (p *pod) containerPodEvents(flag string, pod *kubernetes.Pod, c *kubernetes
 		ports = []kubernetes.ContainerPort{{ContainerPort: 0}}
 	}
 
-	var events []bus.Event
+	events := []bus.Event{}
 	portsMap := mapstr.M{}
 
 	ShouldPut(meta, "container", cmeta, p.logger)

@@ -37,6 +37,7 @@ import (
 	v2 "github.com/elastic/beats/v7/filebeat/input/v2"
 	"github.com/elastic/beats/v7/libbeat/beat"
 	"github.com/elastic/beats/v7/libbeat/common/acker"
+	"github.com/elastic/beats/v7/libbeat/common/file"
 	"github.com/elastic/beats/v7/libbeat/common/transform/typeconv"
 	"github.com/elastic/beats/v7/libbeat/statestore"
 	"github.com/elastic/beats/v7/libbeat/statestore/storetest"
@@ -66,9 +67,7 @@ type registryEntry struct {
 }
 
 func newInputTestingEnvironment(t *testing.T) *inputTestingEnvironment {
-	if err := logp.DevelopmentSetup(logp.ToObserverOutput()); err != nil {
-		t.Fatalf("error setting up dev logging: %s", err)
-	}
+	logp.DevelopmentSetup(logp.ToObserverOutput())
 
 	t.Cleanup(func() {
 		if t.Failed() {
@@ -96,7 +95,7 @@ func (e *inputTestingEnvironment) mustCreateInput(config map[string]interface{})
 	e.t.Helper()
 	e.grp = unison.TaskGroup{}
 	manager := e.getManager()
-	manager.Init(&e.grp, v2.ModeRun)
+	manager.Init(&e.grp)
 	c := conf.MustNewConfigFrom(config)
 	inp, err := manager.Create(c)
 	if err != nil {
@@ -108,7 +107,7 @@ func (e *inputTestingEnvironment) mustCreateInput(config map[string]interface{})
 func (e *inputTestingEnvironment) createInput(config map[string]interface{}) (v2.Input, error) {
 	e.grp = unison.TaskGroup{}
 	manager := e.getManager()
-	manager.Init(&e.grp, v2.ModeRun)
+	manager.Init(&e.grp)
 	c := conf.MustNewConfigFrom(config)
 	inp, err := manager.Create(c)
 	if err != nil {
@@ -374,7 +373,13 @@ func (e *inputTestingEnvironment) getRegistryState(key string) (registryEntry, e
 
 func getIDFromPath(filepath, inputID string, fi os.FileInfo) string {
 	identifier, _ := newINodeDeviceIdentifier(nil)
-	src := identifier.GetSource(loginp.FSEvent{Descriptor: loginp.FileDescriptor{Info: fi}, Op: loginp.OpCreate, NewPath: filepath})
+	src := identifier.GetSource(loginp.FSEvent{
+		Descriptor: loginp.FileDescriptor{
+			Info: file.ExtendFileInfo(fi),
+		},
+		Op:      loginp.OpCreate,
+		NewPath: filepath,
+	})
 	return "filestream::" + inputID + "::" + src.Name()
 }
 
@@ -443,7 +448,7 @@ func (e *inputTestingEnvironment) waitUntilHarvesterIsDone() {
 	}
 }
 
-// requireEventReceived requires that the list of messages has made it into the output.
+// requireEventsReceived requires that the list of messages has made it into the output.
 func (e *inputTestingEnvironment) requireEventsReceived(events []string) {
 	foundEvents := make([]bool, len(events))
 	checkedEventCount := 0

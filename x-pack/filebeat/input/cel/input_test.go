@@ -7,6 +7,7 @@ package cel
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"io"
 	"math/rand"
@@ -22,6 +23,7 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/icholy/digest"
 
 	v2 "github.com/elastic/beats/v7/filebeat/input/v2"
 	inputcursor "github.com/elastic/beats/v7/filebeat/input/v2/input-cursor"
@@ -31,8 +33,11 @@ import (
 	"github.com/elastic/elastic-agent-libs/mapstr"
 )
 
+var runRemote = flag.Bool("run_remote", false, "run tests using remote endpoints")
+
 var inputTests = []struct {
 	name          string
+	remote        bool
 	server        func(*testing.T, http.HandlerFunc, map[string]interface{})
 	handler       http.HandlerFunc
 	config        map[string]interface{}
@@ -339,6 +344,26 @@ var inputTests = []struct {
 			{"message": "third"},
 		},
 	},
+	{
+		name: "optional_types",
+		config: map[string]interface{}{
+			"interval": 1,
+			// Program returns a compilation error if optional types are not enabled.
+			"program": `{"events":[
+				has(state.?field.?does.?not.exist) ?
+					{"message":"Hello, World!"}
+				:
+					{"message":"Hello, Void!"}
+			]}`,
+			"state": nil,
+			"resource": map[string]interface{}{
+				"url": "",
+			},
+		},
+		want: []map[string]interface{}{
+			{"message": "Hello, Void!"},
+		},
+	},
 
 	// FS-based tests.
 	{
@@ -534,6 +559,142 @@ var inputTests = []struct {
 		},
 	},
 	{
+		name:   "GET_request_check_user_agent_default",
+		server: newTestServer(httptest.NewServer),
+		config: map[string]interface{}{
+			"interval": 1,
+			"program": `
+	get(state.url).Body.as(body, {
+		"events": [body.decode_json()]
+	})
+	`,
+		},
+		handler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("content-type", "application/json")
+			msg := `{"hello":[{"world":"moon"},{"space":[{"cake":"pumpkin"}]}]}`
+			if r.UserAgent() != userAgent {
+				w.WriteHeader(http.StatusBadRequest)
+				msg = fmt.Sprintf(`{"error":"expected user agent was %#q"}`, userAgent)
+			}
+			if r.Method != http.MethodGet {
+				w.WriteHeader(http.StatusBadRequest)
+				msg = fmt.Sprintf(`{"error":"expected method was %#q"}`, http.MethodGet)
+			}
+
+			w.Write([]byte(msg))
+		},
+		want: []map[string]interface{}{
+			{
+				"hello": []interface{}{
+					map[string]interface{}{
+						"world": "moon",
+					},
+					map[string]interface{}{
+						"space": []interface{}{
+							map[string]interface{}{
+								"cake": "pumpkin",
+							},
+						},
+					},
+				},
+			},
+		},
+	},
+	{
+		name:   "GET_request_check_user_agent_user_defined",
+		server: newTestServer(httptest.NewServer),
+		config: map[string]interface{}{
+			"interval": 1,
+			"program": `
+	get_request(state.url).with({
+		"Header": {
+			"User-Agent": ["custom user agent"]
+		}
+	}).do_request().Body.as(body, {
+		"events": [body.decode_json()]
+	})
+	`,
+		},
+		handler: func(w http.ResponseWriter, r *http.Request) {
+			const customUserAgent = "custom user agent"
+
+			w.Header().Set("content-type", "application/json")
+			msg := `{"hello":[{"world":"moon"},{"space":[{"cake":"pumpkin"}]}]}`
+			if r.UserAgent() != customUserAgent {
+				w.WriteHeader(http.StatusBadRequest)
+				msg = fmt.Sprintf(`{"error":"expected user agent was %#q"}`, customUserAgent)
+			}
+			if r.Method != http.MethodGet {
+				w.WriteHeader(http.StatusBadRequest)
+				msg = fmt.Sprintf(`{"error":"expected method was %#q"}`, http.MethodGet)
+			}
+
+			w.Write([]byte(msg))
+		},
+		want: []map[string]interface{}{
+			{
+				"hello": []interface{}{
+					map[string]interface{}{
+						"world": "moon",
+					},
+					map[string]interface{}{
+						"space": []interface{}{
+							map[string]interface{}{
+								"cake": "pumpkin",
+							},
+						},
+					},
+				},
+			},
+		},
+	},
+	{
+		name:   "GET_request_check_user_agent_none",
+		server: newTestServer(httptest.NewServer),
+		config: map[string]interface{}{
+			"interval": 1,
+			"program": `
+	get_request(state.url).with({
+		"Header": {
+			"User-Agent": [""]
+		}
+	}).do_request().Body.as(body, {
+		"events": [body.decode_json()]
+	})
+	`,
+		},
+		handler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("content-type", "application/json")
+			msg := `{"hello":[{"world":"moon"},{"space":[{"cake":"pumpkin"}]}]}`
+			if _, ok := r.Header["User-Agent"]; ok {
+				w.WriteHeader(http.StatusBadRequest)
+				msg = fmt.Sprintf(`{"error":"expected no user agent header, but got %#q"}`, r.UserAgent())
+			}
+			if r.Method != http.MethodGet {
+				w.WriteHeader(http.StatusBadRequest)
+				msg = fmt.Sprintf(`{"error":"expected method was %#q"}`, http.MethodGet)
+			}
+
+			w.Write([]byte(msg))
+		},
+		want: []map[string]interface{}{
+			{
+				"hello": []interface{}{
+					map[string]interface{}{
+						"world": "moon",
+					},
+					map[string]interface{}{
+						"space": []interface{}{
+							map[string]interface{}{
+								"cake": "pumpkin",
+							},
+						},
+					},
+				},
+			},
+		},
+	},
+	{
 		name:   "GET_request_TLS",
 		server: newTestServer(httptest.NewTLSServer),
 		config: map[string]interface{}{
@@ -676,6 +837,37 @@ var inputTests = []struct {
 		handler: retryHandler(),
 		want: []map[string]interface{}{
 			{"hello": "world"},
+		},
+	},
+	{
+		name:   "retry_failure_no_success",
+		server: newTestServer(httptest.NewServer),
+		config: map[string]interface{}{
+			"interval": 1,
+			"resource": map[string]interface{}{
+				"retry": map[string]interface{}{
+					"max_attempts": 2,
+				},
+			},
+			"program": `
+	get(state.url).as(resp, {
+		"url": state.url,
+		"events": [
+			bytes(resp.Body).decode_json(),
+			{"status": resp.StatusCode},
+		],
+	})
+	`,
+		},
+		handler: func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("content-type", "application/json")
+			w.WriteHeader(http.StatusGatewayTimeout)
+			//nolint:errcheck // No point checking errors in test server.
+			w.Write([]byte(`{"error":"we were too slow"}`))
+		},
+		want: []map[string]interface{}{
+			{"error": "we were too slow"},
+			{"status": float64(504)}, // Float because of JSON.
 		},
 	},
 
@@ -1056,6 +1248,100 @@ var inputTests = []struct {
 
 	// Authenticated access tests.
 	{
+		name: "digest_accept",
+		server: func(t *testing.T, h http.HandlerFunc, config map[string]interface{}) {
+			s := httptest.NewServer(h)
+			config["resource.url"] = s.URL
+			t.Cleanup(s.Close)
+		},
+		config: map[string]interface{}{
+			"interval":             1,
+			"auth.digest.user":     "test_client",
+			"auth.digest.password": "secret_password",
+			"program": `
+	bytes(get(state.url).Body).as(body, {
+		"events": [body.decode_json()]
+	})
+	`,
+		},
+		handler: digestAuthHandler(
+			"test_client",
+			"secret_password",
+			"test",
+			"random_string",
+			defaultHandler(http.MethodGet, ""),
+		),
+		want: []map[string]interface{}{
+			{
+				"hello": []interface{}{
+					map[string]interface{}{
+						"world": "moon",
+					},
+					map[string]interface{}{
+						"space": []interface{}{
+							map[string]interface{}{
+								"cake": "pumpkin",
+							},
+						},
+					},
+				},
+			},
+		},
+	},
+	{
+		name: "digest_reject",
+		server: func(t *testing.T, h http.HandlerFunc, config map[string]interface{}) {
+			s := httptest.NewServer(h)
+			config["resource.url"] = s.URL
+			t.Cleanup(s.Close)
+		},
+		config: map[string]interface{}{
+			"interval":             1,
+			"auth.digest.user":     "test_client",
+			"auth.digest.password": "wrong_secret_password",
+			"program": `
+	bytes(get(state.url).Body).as(body, {
+		"events": [body.decode_json()]
+	})
+	`,
+		},
+		handler: digestAuthHandler(
+			"test_client",
+			"secret_password",
+			"test",
+			"random_string",
+			defaultHandler(http.MethodGet, ""),
+		),
+		want: []map[string]interface{}{
+			{
+				"error": "not authorized",
+			},
+		},
+	},
+	{
+		// Test case modelled on `curl --digest -u test_user:secret_password https://httpbin.org/digest-auth/auth/test_user/secret_password/md5`.
+		name:   "digest_remote",
+		remote: true,
+		server: func(_ *testing.T, _ http.HandlerFunc, _ map[string]interface{}) {},
+		config: map[string]interface{}{
+			"resource.url":         "https://httpbin.org/digest-auth/auth/test_user/secret_password/md5",
+			"interval":             1,
+			"auth.digest.user":     "test_user",
+			"auth.digest.password": "secret_password",
+			"program": `
+	bytes(get(state.url).Body).as(body, {
+		"events": [body.decode_json()]
+	})
+	`,
+		},
+		want: []map[string]interface{}{
+			{
+				"authenticated": true,
+				"user":          "test_user",
+			},
+		},
+	},
+	{
 		name: "OAuth2",
 		server: func(t *testing.T, h http.HandlerFunc, config map[string]interface{}) {
 			s := httptest.NewServer(h)
@@ -1183,10 +1469,48 @@ var inputTests = []struct {
 		want: []map[string]interface{}{
 			{
 				"error": map[string]interface{}{
-					"message": "failed eval: no such overload", // This is the best we get for some errors from CEL.
+					// This is the best we get for some errors from CEL.
+					"message": `failed eval: ERROR: <input>:3:56: no such overload
+ |   bytes(get(state.url+'/'+r.id).Body).decode_json()).as(events, {
+ | .......................................................^`,
 				},
 			},
 		},
+	},
+
+	{
+		name: "debug",
+		config: map[string]interface{}{
+			"interval": 1,
+			"program":  `{"events":[{"message":{"value": 1+debug("partial sum", 2+3)}}]}`,
+			"state":    nil,
+			"resource": map[string]interface{}{
+				"url": "",
+			},
+		},
+		time: func() time.Time { return time.Date(2010, 2, 8, 0, 0, 0, 0, time.UTC) },
+		want: []map[string]interface{}{{
+			"message": map[string]interface{}{
+				"value": 6.0, // float64 due to json encoding.
+			},
+		}},
+	},
+	{
+		name: "debug_error",
+		config: map[string]interface{}{
+			"interval": 1,
+			"program":  `{"events":[{"message":{"value": try(debug("divide by zero", 0/0))}}]}`,
+			"state":    nil,
+			"resource": map[string]interface{}{
+				"url": "",
+			},
+		},
+		time: func() time.Time { return time.Date(2010, 2, 8, 0, 0, 0, 0, time.UTC) },
+		want: []map[string]interface{}{{
+			"message": map[string]interface{}{
+				"value": "division by zero",
+			},
+		}},
 	},
 
 	// not yet done from httpjson (some are redundant since they are compositional products).
@@ -1207,10 +1531,14 @@ func TestInput(t *testing.T) {
 		"ndjson_log_file_simple_file_scheme": "Path handling on Windows is incompatible with url.Parse/url.URL.String. See go.dev/issue/6027.",
 	}
 
+	logp.TestingSetup()
 	for _, test := range inputTests {
 		t.Run(test.name, func(t *testing.T) {
 			if reason, skip := skipOnWindows[test.name]; runtime.GOOS == "windows" && skip {
 				t.Skip(reason)
+			}
+			if test.remote && !*runRemote {
+				t.Skip("skipping remote endpoint test")
 			}
 
 			if test.server != nil {
@@ -1242,7 +1570,7 @@ func TestInput(t *testing.T) {
 				t.Fatalf("unexpected error running test: %v", err)
 			}
 
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 
 			v2Ctx := v2.Context{
@@ -1384,13 +1712,13 @@ func defaultHandler(expectedMethod, expectedBody string) http.HandlerFunc {
 		switch {
 		case r.Method != expectedMethod:
 			w.WriteHeader(http.StatusBadRequest)
-			msg = fmt.Sprintf(`{"error":"expected method was %q"}`, expectedMethod)
+			msg = fmt.Sprintf(`{"error":"expected method was %#q"}`, expectedMethod)
 		case expectedBody != "":
 			body, _ := io.ReadAll(r.Body)
 			r.Body.Close()
 			if expectedBody != string(body) {
 				w.WriteHeader(http.StatusBadRequest)
-				msg = fmt.Sprintf(`{"error":"expected body was %q"}`, expectedBody)
+				msg = fmt.Sprintf(`{"error":"expected body was %#q"}`, expectedBody)
 			}
 		}
 
@@ -1443,6 +1771,52 @@ func retryHandler() http.HandlerFunc {
 		}
 		w.WriteHeader(rand.Intn(100) + 500)
 		count++
+	}
+}
+
+//nolint:errcheck // No point checking errors in test server.
+func digestAuthHandler(user, pass, realm, nonce string, handle http.HandlerFunc) http.HandlerFunc {
+	chal := &digest.Challenge{
+		Realm:     realm,
+		Nonce:     nonce,
+		Algorithm: "MD5",
+		QOP:       []string{"auth"},
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		auth := r.Header.Get("Authorization")
+		if auth == "" {
+			w.Header().Add("WWW-Authenticate", chal.String())
+			w.WriteHeader(http.StatusUnauthorized)
+			return
+		}
+
+		reqCred, err := digest.ParseCredentials(auth)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		srvCred, err := digest.Digest(chal, digest.Options{
+			Method:   r.Method,
+			URI:      r.URL.RequestURI(),
+			Cnonce:   reqCred.Cnonce,
+			Count:    reqCred.Nc,
+			Username: user,
+			Password: pass,
+		})
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		if reqCred.Response != srvCred.Response {
+			w.Header().Set("content-type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			w.Write([]byte(`{"error":"not authorized"}`))
+			return
+		}
+
+		handle(w, r)
 	}
 }
 

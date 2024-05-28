@@ -28,9 +28,9 @@ import (
 	"unsafe"
 
 	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/require"
 
 	"github.com/elastic/beats/v7/libbeat/beat"
+	"github.com/elastic/beats/v7/libbeat/common/capabilities"
 	conf "github.com/elastic/elastic-agent-libs/config"
 	"github.com/elastic/elastic-agent-libs/logp"
 	"github.com/elastic/elastic-agent-libs/mapstr"
@@ -39,43 +39,53 @@ import (
 )
 
 func TestAddProcessMetadata(t *testing.T) {
-	require.NoError(t, logp.TestingSetup(logp.WithSelectors(processorName)))
+	logp.TestingSetup(logp.WithSelectors(processorName))
 
+	capMock, err := capabilities.FromUint64(0xabacabb)
+	if err != nil {
+		t.Fatalf("could not instantiate capabilities: %s", err)
+	}
 	startTime := time.Now()
 	testProcs := testProvider{
 		1: {
-			name:  "systemd",
-			title: "/usr/lib/systemd/systemd --switched-root --system --deserialize 22",
-			exe:   "/usr/lib/systemd/systemd",
-			args:  []string{"/usr/lib/systemd/systemd", "--switched-root", "--system", "--deserialize", "22"},
+			name:     "systemd",
+			entityID: "XCOVE56SVVEOKBNX",
+			title:    "/usr/lib/systemd/systemd --switched-root --system --deserialize 22",
+			exe:      "/usr/lib/systemd/systemd",
+			args:     []string{"/usr/lib/systemd/systemd", "--switched-root", "--system", "--deserialize", "22"},
 			env: map[string]string{
 				"HOME":       "/",
 				"TERM":       "linux",
 				"BOOT_IMAGE": "/boot/vmlinuz-4.11.8-300.fc26.x86_64",
 				"LANG":       "en_US.UTF-8",
 			},
-			pid:       1,
-			ppid:      0,
-			startTime: startTime,
-			username:  "root",
-			userid:    "0",
+			pid:          1,
+			ppid:         0,
+			startTime:    startTime,
+			username:     "root",
+			userid:       "0",
+			capEffective: capMock,
+			capPermitted: capMock,
 		},
 		3: {
-			name:  "systemd",
-			title: "/usr/lib/systemd/systemd --switched-root --system --deserialize 22",
-			exe:   "/usr/lib/systemd/systemd",
-			args:  []string{"/usr/lib/systemd/systemd", "--switched-root", "--system", "--deserialize", "22"},
+			name:     "systemd",
+			entityID: "XCOVE56SVVEOKBNX",
+			title:    "/usr/lib/systemd/systemd --switched-root --system --deserialize 22",
+			exe:      "/usr/lib/systemd/systemd",
+			args:     []string{"/usr/lib/systemd/systemd", "--switched-root", "--system", "--deserialize", "22"},
 			env: map[string]string{
 				"HOME":       "/",
 				"TERM":       "linux",
 				"BOOT_IMAGE": "/boot/vmlinuz-4.11.8-300.fc26.x86_64",
 				"LANG":       "en_US.UTF-8",
 			},
-			pid:       1,
-			ppid:      0,
-			startTime: startTime,
-			username:  "user",
-			userid:    "1001",
+			pid:          1,
+			ppid:         0,
+			startTime:    startTime,
+			username:     "user",
+			userid:       "1001",
+			capEffective: capMock,
+			capPermitted: capMock,
 		},
 	}
 
@@ -151,6 +161,7 @@ func TestAddProcessMetadata(t *testing.T) {
 				},
 				"process": mapstr.M{
 					"name":       "systemd",
+					"entity_id":  "XCOVE56SVVEOKBNX",
 					"title":      "/usr/lib/systemd/systemd --switched-root --system --deserialize 22",
 					"executable": "/usr/lib/systemd/systemd",
 					"args":       []string{"/usr/lib/systemd/systemd", "--switched-root", "--system", "--deserialize", "22"},
@@ -162,6 +173,12 @@ func TestAddProcessMetadata(t *testing.T) {
 					"owner": mapstr.M{
 						"name": "root",
 						"id":   "0",
+					},
+					"thread": mapstr.M{
+						"capabilities": mapstr.M{
+							"effective": capMock,
+							"permitted": capMock,
+						},
 					},
 				},
 				"container": mapstr.M{
@@ -236,6 +253,7 @@ func TestAddProcessMetadata(t *testing.T) {
 				"parent": mapstr.M{
 					"process": mapstr.M{
 						"name":       "systemd",
+						"entity_id":  "XCOVE56SVVEOKBNX",
 						"title":      "/usr/lib/systemd/systemd --switched-root --system --deserialize 22",
 						"executable": "/usr/lib/systemd/systemd",
 						"args":       []string{"/usr/lib/systemd/systemd", "--switched-root", "--system", "--deserialize", "22"},
@@ -247,6 +265,12 @@ func TestAddProcessMetadata(t *testing.T) {
 						"owner": mapstr.M{
 							"name": "root",
 							"id":   "0",
+						},
+						"thread": mapstr.M{
+							"capabilities": mapstr.M{
+								"effective": capMock,
+								"permitted": capMock,
+							},
 						},
 					},
 					"container": mapstr.M{
@@ -270,6 +294,7 @@ func TestAddProcessMetadata(t *testing.T) {
 				"parent": mapstr.M{
 					"process": mapstr.M{
 						"name":       "systemd",
+						"entity_id":  "XCOVE56SVVEOKBNX",
 						"title":      "/usr/lib/systemd/systemd --switched-root --system --deserialize 22",
 						"executable": "/usr/lib/systemd/systemd",
 						"args":       []string{"/usr/lib/systemd/systemd", "--switched-root", "--system", "--deserialize", "22"},
@@ -287,6 +312,12 @@ func TestAddProcessMetadata(t *testing.T) {
 						"owner": mapstr.M{
 							"name": "root",
 							"id":   "0",
+						},
+						"thread": mapstr.M{
+							"capabilities": mapstr.M{
+								"effective": capMock,
+								"permitted": capMock,
+							},
 						},
 					},
 					"container": mapstr.M{
@@ -311,6 +342,7 @@ func TestAddProcessMetadata(t *testing.T) {
 				"parent": mapstr.M{
 					"process": mapstr.M{
 						"name":       "systemd",
+						"entity_id":  "XCOVE56SVVEOKBNX",
 						"title":      "/usr/lib/systemd/systemd --switched-root --system --deserialize 22",
 						"executable": "/usr/lib/systemd/systemd",
 						"args":       []string{"/usr/lib/systemd/systemd", "--switched-root", "--system", "--deserialize", "22"},
@@ -328,6 +360,12 @@ func TestAddProcessMetadata(t *testing.T) {
 						"owner": mapstr.M{
 							"name": "root",
 							"id":   "0",
+						},
+						"thread": mapstr.M{
+							"capabilities": mapstr.M{
+								"effective": capMock,
+								"permitted": capMock,
+							},
 						},
 					},
 				},
@@ -509,6 +547,7 @@ func TestAddProcessMetadata(t *testing.T) {
 				},
 				"process": mapstr.M{
 					"name":       "systemd",
+					"entity_id":  "XCOVE56SVVEOKBNX",
 					"title":      "/usr/lib/systemd/systemd --switched-root --system --deserialize 22",
 					"executable": "/usr/lib/systemd/systemd",
 					"args":       []string{"/usr/lib/systemd/systemd", "--switched-root", "--system", "--deserialize", "22"},
@@ -520,6 +559,12 @@ func TestAddProcessMetadata(t *testing.T) {
 					"owner": mapstr.M{
 						"name": "root",
 						"id":   "0",
+					},
+					"thread": mapstr.M{
+						"capabilities": mapstr.M{
+							"effective": capMock,
+							"permitted": capMock,
+						},
 					},
 				},
 				"container": mapstr.M{
@@ -634,6 +679,7 @@ func TestAddProcessMetadata(t *testing.T) {
 				},
 				"process": mapstr.M{
 					"name":       "systemd",
+					"entity_id":  "XCOVE56SVVEOKBNX",
 					"title":      "/usr/lib/systemd/systemd --switched-root --system --deserialize 22",
 					"executable": "/usr/lib/systemd/systemd",
 					"args":       []string{"/usr/lib/systemd/systemd", "--switched-root", "--system", "--deserialize", "22"},
@@ -645,6 +691,12 @@ func TestAddProcessMetadata(t *testing.T) {
 					"owner": mapstr.M{
 						"name": "user",
 						"id":   "1001",
+					},
+					"thread": mapstr.M{
+						"capabilities": mapstr.M{
+							"effective": capMock,
+							"permitted": capMock,
+						},
 					},
 				},
 			},
@@ -724,7 +776,7 @@ func TestAddProcessMetadata(t *testing.T) {
 			config: mapstr.M{
 				"cgroup_regex": "",
 			},
-			initErr: errors.New("fail to unpack the add_process_metadata configuration: cgroup_regexp must contain exactly one capturing group for the container ID accessing config"),
+			initErr: errors.New("cgroup_regexp must contain exactly one capturing group for the container ID accessing config"),
 		},
 		{
 			description: "cgroup_prefixes configured",
@@ -745,17 +797,23 @@ func TestAddProcessMetadata(t *testing.T) {
 		},
 	} {
 		t.Run(test.description, func(t *testing.T) {
-			config, err := conf.NewConfigFrom(test.config)
-			if err != nil {
-				t.Fatal(err)
+			configC, err := conf.NewConfigFrom(test.config)
+			assert.NoError(t, err)
+
+			config := defaultConfig()
+			if err := configC.Unpack(&config); err != nil {
+				if test.initErr == nil {
+					t.Fatal(err)
+				}
+				assert.EqualError(t, err, test.initErr.Error())
+				return
 			}
 
 			proc, err := newProcessMetadataProcessorWithProvider(config, testProcs, true)
-			if test.initErr == nil {
-				if err != nil {
+			if err != nil {
+				if test.initErr == nil {
 					t.Fatal(err)
 				}
-			} else {
 				assert.EqualError(t, err, test.initErr.Error())
 				return
 			}
@@ -786,7 +844,11 @@ func TestAddProcessMetadata(t *testing.T) {
 			"include_fields": []string{"process.name"},
 		}
 
-		config, err := conf.NewConfigFrom(c)
+		configC, err := conf.NewConfigFrom(c)
+		assert.NoError(t, err)
+
+		config := defaultConfig()
+		err = configC.Unpack(&config)
 		assert.NoError(t, err)
 
 		proc, err := newProcessMetadataProcessorWithProvider(config, testProcs, true)
@@ -817,7 +879,7 @@ func TestAddProcessMetadata(t *testing.T) {
 }
 
 func TestUsingCache(t *testing.T) {
-	require.NoError(t, logp.TestingSetup(logp.WithSelectors(processorName)))
+	logp.TestingSetup(logp.WithSelectors(processorName))
 
 	selfPID := os.Getpid()
 
@@ -926,7 +988,7 @@ func TestUsingCache(t *testing.T) {
 }
 
 func TestSelf(t *testing.T) {
-	require.NoError(t, logp.TestingSetup(logp.WithSelectors(processorName)))
+	logp.TestingSetup(logp.WithSelectors(processorName))
 
 	config, err := conf.NewConfigFrom(mapstr.M{
 		"match_pids": []string{"self_pid"},
@@ -960,7 +1022,7 @@ func TestSelf(t *testing.T) {
 }
 
 func TestBadProcess(t *testing.T) {
-	require.NoError(t, logp.TestingSetup(logp.WithSelectors(processorName)))
+	logp.TestingSetup(logp.WithSelectors(processorName))
 
 	config, err := conf.NewConfigFrom(mapstr.M{
 		"match_pids": []string{"self_pid"},

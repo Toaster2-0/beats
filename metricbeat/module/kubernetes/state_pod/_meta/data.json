@@ -11,9 +11,9 @@
             "name": "kind-control-plane"
         },
         "pod": {
-            "host_ip": "172.18.0.2",
-            "ip": "10.244.0.22",
-            "name": "hello-28192809-jbn5z",
+            "host_ip": "172.21.0.2",
+            "ip": "10.244.0.173",
+            "name": "hello-28564555-zdfjz",
             "status": {
                 "phase": "succeeded",
                 "ready": "false",

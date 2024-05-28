@@ -25,7 +25,7 @@ pipeline {
     TERRAFORM_VERSION = "1.0.2"
     XPACK_MODULE_PATTERN = '^x-pack\\/[a-z0-9]+beat\\/module\\/([^\\/]+)\\/.*'
     KIND_VERSION = 'v0.20.0'
-    K8S_VERSION = 'v1.27.3'
+    K8S_VERSION = 'v1.29.0'
   }
   options {
     timeout(time: 6, unit: 'HOURS')
@@ -199,16 +199,6 @@ pipeline {
 COMMIT=${env.GIT_BASE_COMMIT}
 VERSION=${env.VERSION}-SNAPSHOT""")
       archiveArtifacts artifacts: 'packaging.properties'
-    }
-    cleanup {
-      // Required to enable the flaky test reporting with GitHub. Workspace exists since the post/always runs earlier
-      dir("${BASE_DIR}"){
-        notifyBuildResult(prComment: true,
-                          slackComment: true,
-                          analyzeFlakey: !isTag(), jobName: getFlakyJobName(withBranch: getFlakyBranch()),
-                          githubIssue: isGitHubIssueEnabled(),
-                          githubLabels: 'Team:Elastic-Agent-Data-Plane')
-      }
     }
   }
 }
@@ -461,7 +451,7 @@ def pushCIDockerImages(Map args = [:]) {
   def arch = args.get('arch', 'amd64')
   def beatsFolder = args.beatsFolder
   catchError(buildResult: 'UNSTABLE', message: 'Unable to push Docker images', stageResult: 'FAILURE') {
-    def defaultVariants = [ '' : 'beats', '-oss' : 'beats', '-ubi8' : 'beats' ]
+    def defaultVariants = [ '' : 'beats', '-oss' : 'beats', '-ubi' : 'beats' ]
     if (beatsFolder.endsWith('auditbeat')) {
       tagAndPush(beatName: 'auditbeat', arch: arch, variants: defaultVariants)
     } else if (beatsFolder.endsWith('filebeat')) {
@@ -608,6 +598,9 @@ def targetWithoutNode(Map args = [:]) {
         }
       }
       withTools(k8s: installK8s, gcp: withGCP, nodejs: withNodejs) {
+        if (isPackaging && (directory.equals('x-pack/agentbeat') || directory.equals('x-pack/osquerybeat'))) {
+          sh(label: 'install msitools', script: '.buildkite/scripts/install-msitools.sh')
+        }
         // make commands use -C <folder> while mage commands require the dir(folder)
         // let's support this scenario with the location variable.
         dir(isMage ? directory : '') {

@@ -20,6 +20,7 @@ package redis
 import (
 	"context"
 	"errors"
+	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
@@ -233,8 +234,11 @@ func (c *client) publishEventsBulk(conn redis.Conn, command string) publishFn {
 			return nil, nil
 		}
 
+		start := time.Now()
 		// RPUSH returns total length of list -> fail and retry all on error
 		_, err := conn.Do(command, args...)
+		took := time.Since(start)
+		c.observer.ReportLatency(took)
 		if err != nil {
 			c.log.Errorf("Failed to %v to redis list with: %+v", command, err)
 			return okEvents, err
@@ -283,7 +287,7 @@ func (c *client) publishEventsPipeline(conn redis.Conn, command string) publishF
 		for i := range serialized {
 			_, err := conn.Receive()
 			if err != nil {
-				if _, ok := err.(redis.Error); ok {
+				if _, ok := err.(redis.Error); ok { //nolint:errorlint //this line checks against a type, not an instance of an error
 					c.log.Errorf("Failed to %v event to list with %+v",
 						command, err)
 					failed = append(failed, data[i])
@@ -314,10 +318,11 @@ func serializeEvents(
 
 	succeeded := data
 	for _, d := range data {
+		d := d
 		serializedEvent, err := codec.Encode(index, &d.Content)
 		if err != nil {
-			log.Errorf("Encoding event failed with error: %+v", err)
-			log.Debugf("Failed event: %v", d.Content)
+			log.Errorf("Encoding event failed with error: %+v. Look at the event log file to view the event", err)
+			log.Errorw(fmt.Sprintf("Failed event: %v", d.Content), logp.TypeKey, logp.EventType)
 			goto failLoop
 		}
 
@@ -332,10 +337,11 @@ failLoop:
 	succeeded = data[:i]
 	rest := data[i+1:]
 	for _, d := range rest {
+		d := d
 		serializedEvent, err := codec.Encode(index, &d.Content)
 		if err != nil {
-			log.Errorf("Encoding event failed with error: %+v", err)
-			log.Debugf("Failed event: %v", d.Content)
+			log.Errorf("Encoding event failed with error: %+v. Look at the event log file to view the event", err)
+			log.Errorw(fmt.Sprintf("Failed event: %v", d.Content), logp.TypeKey, logp.EventType)
 			i++
 			continue
 		}
