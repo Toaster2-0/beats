@@ -31,6 +31,7 @@ import (
 	_ "github.com/elastic/beats/v7/libbeat/outputs/elasticsearch"
 	_ "github.com/elastic/beats/v7/libbeat/outputs/fileout"
 	_ "github.com/elastic/beats/v7/libbeat/outputs/logstash"
+	_ "github.com/elastic/beats/v7/libbeat/outputs/sqlout"
 	"github.com/elastic/beats/v7/libbeat/publisher/pipeline/stress"
 	_ "github.com/elastic/beats/v7/libbeat/publisher/queue/memqueue"
 	conf "github.com/elastic/elastic-agent-libs/config"
